@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
 
 namespace ApiPuntoVenta.Models
 {
@@ -17,7 +18,7 @@ namespace ApiPuntoVenta.Models
         [Required, StringLength(20)]
         public string? UserName { get; set; }
 
-        [Required, StringLength(20)]
+        [Required, StringLength(200)]
         public string? Password { get; set; }
 
         [Required, StringLength(100)]

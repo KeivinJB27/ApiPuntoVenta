@@ -14,6 +14,9 @@ builder.Services.AddSwaggerGen();
 var connectionString = builder.Configuration.GetConnectionString("MyConection");
 builder.Services.AddDbContext<ApplicationDbContext>(options => options.UseSqlServer(connectionString));
 
+// Agrega tu servicio PasswordHasher aquí
+builder.Services.AddScoped<PasswordHasher>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
