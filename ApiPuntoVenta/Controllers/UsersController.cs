@@ -2,44 +2,57 @@
 using Microsoft.EntityFrameworkCore;
 using ApiPuntoVenta.Models;
 using ApiPuntoVenta.Services;
+using Microsoft.AspNetCore.Authorization;
 
 namespace ApiPuntoVenta.Controllers
 {
+    /// <summary>
+    /// Controlador para gestionar operaciones relacionadas con los usuarios del sistema.
+    /// </summary>
+
+    //[Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class UsersController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
         private readonly PasswordHasher _passhash;
+        private readonly ILogger<UsersController> _logger;
 
-        public UsersController(ApplicationDbContext context, PasswordHasher passhash)
+        public UsersController(ApplicationDbContext context, PasswordHasher passhash, ILogger<UsersController> logger)
         {
             _context = context;
             _passhash = passhash;
+            _logger = logger;
         }
+
 
         // GET: api/Users
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<User>>> GetUsers()
+        public async Task<IActionResult> GetUsers()
         {
             try
             {
                 // Intenta obtener la lista de usuarios 
                 var users = await _context.Users.ToListAsync();
-                return users;
+
+                // Si todo va bien, devuelve una respuesta de éxito
+                return Ok(users);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // Si hay un error al obtener los usuarios, devuelve un error interno del servidor
-                // Aquí podrías registrar el error
-                return StatusCode(500, "Internal server error");
+                // Registra el error
+                _logger.LogError(ex, "An error occurred while getting the users.");
+
+                // Devuelve un error interno del servidor sin detalles del error
+                return StatusCode(500, new { message = "Internal server error" });
             }
         }
 
 
         // GET: api/Users/5
         [HttpGet("{id}")]
-        public async Task<ActionResult<User>> GetUser(int id)
+        public async Task<IActionResult> GetUser(int id)
         {
             try
             {
@@ -49,16 +62,18 @@ namespace ApiPuntoVenta.Controllers
                 // Si el usuario no se encuentra, devuelve un error de no encontrado
                 if (user == null)
                 {
-                    return NotFound();
+                    return NotFound(new { message = "User not found" });
                 }
 
-                return user;
+                return Ok(user);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // Si hay un error al obtener el usuario, devuelve un error interno del servidor
-                // Aquí podrías registrar el error
-                return StatusCode(500, "Internal server error");
+                // Registra el error
+                _logger.LogError(ex, "An error occurred while getting the user.");
+
+                // Devuelve un error interno del servidor sin detalles del error
+                return StatusCode(500, new { message = "Internal server error" });
             }
         }
 
@@ -70,20 +85,23 @@ namespace ApiPuntoVenta.Controllers
             // Verifica si el objeto de usuario es nulo
             if (user == null)
             {
-                return BadRequest("User is null");
+                return BadRequest(new { message = "User is null" });
             }
 
             // Verifica si el ID del usuario coincide con el ID de la ruta
             if (id != user.UserID)
             {
-                return BadRequest();
+                return BadRequest(new { message = "Mismatched user ID" });
             }
 
             // Verifica si el usuario existe antes de intentar actualizarlo
             if (!UserExists(id))
             {
-                return NotFound();
+                return NotFound(new { message = "User not found" });
             }
+
+            // Hashea la contraseña antes de actualizar el usuario
+            user.Password = _passhash.HashPassword(user.Password);
 
             // Marca el usuario como modificado
             _context.Entry(user).State = EntityState.Modified;
@@ -93,11 +111,13 @@ namespace ApiPuntoVenta.Controllers
                 // Intenta guardar los cambios en la base de datos
                 await _context.SaveChangesAsync();
             }
-            catch (DbUpdateConcurrencyException)
+            catch (DbUpdateConcurrencyException ex)
             {
-                // Si hay un error al guardar los cambios, devuelve un error interno del servidor
-                // Aquí podrías registrar el error
-                return StatusCode(500, "Internal server error");
+                // Registra el error
+                _logger.LogError(ex, "An error occurred while updating the user.");
+
+                // Devuelve un error interno del servidor sin detalles del error
+                return StatusCode(500, new { message = "Internal server error" });
             }
             // Si todo va bien, devuelve una respuesta de éxito
             return NoContent();
@@ -106,12 +126,38 @@ namespace ApiPuntoVenta.Controllers
 
         // POST: api/Users
         [HttpPost]
-        public async Task<ActionResult<User>> PostUser(User user)
+        public async Task<IActionResult> PostUser(User user)
         {
             // Verifica si el objeto de usuario es nulo
             if (user == null)
             {
-                return BadRequest("User is null");
+                return BadRequest(new { 
+                    success = false,
+                    message = "No se recibieron datos del usuario." 
+                });
+            }
+
+            // Verifica si los datos de entrada son válidos
+            if (!ModelState.IsValid)
+            {
+                //return BadRequest(ModelState);
+                return BadRequest(new
+                {
+                    success = false,
+                    errors = ModelState.Values
+                   .SelectMany(v => v.Errors)
+                   .Select(e => e.ErrorMessage)
+                });
+            }
+
+            // Verifica si el usuario ya existe
+            if (UserExists(user.UserID))
+            {
+                return Conflict(new
+                {
+                    success = false,
+                    message = "El usuario ya existe!"
+                });
             }
 
             // Hashea la contraseña antes de guardar el usuario
@@ -125,23 +171,34 @@ namespace ApiPuntoVenta.Controllers
                 // Intenta guardar los cambios en la base de datos
                 await _context.SaveChangesAsync();
             }
-            catch (DbUpdateException)
+            catch (DbUpdateException ex)
             {
-                // Si hay un error al guardar los cambios, verifica si el usuario ya existe
-                if (UserExists(user.UserID))
+                // Registra el error
+                _logger.LogError(ex, "Se ha producido un error al guardar los cambios.");
+
+                return StatusCode(500, new
                 {
-                    // Si el usuario ya existe, devuelve un error de conflicto
-                    return Conflict();
-                }
-                else
-                {
-                    // Si el usuario no existe, devuelve un error interno del servidor
-                    // Aquí podrías registrar el error
-                    return StatusCode(500, "Internal server error");
-                }
+                    success = false,
+                    message = "Ocurrió un error interno en el servidor."
+                });
             }
-            // Si todo va bien, devuelve una respuesta de éxito con la ubicación del nuevo recurso
-            return CreatedAtAction("GetUser", new { id = user.UserID }, user);
+
+            // Crea un objeto de usuario para la respuesta que no incluye la contraseña
+            var userResponse = new
+            {
+                UserID = user.UserID,
+                Name = user.Name,
+                LastName = user.LastName,
+                Email = user.Email,
+                PhoneNumber = user.PhoneNumber,
+                // Incluye otros campos del usuario aquí, pero no la contraseña
+            };
+
+            return CreatedAtAction("GetUser", new { id = user.UserID }, new
+            {
+                success = true,
+                user = userResponse
+            });
         }
 
 
@@ -157,7 +214,7 @@ namespace ApiPuntoVenta.Controllers
                 // Si el usuario no se encuentra, devuelve un error de no encontrado
                 if (user == null)
                 {
-                    return NotFound();
+                    return NotFound(new { message = "User not found" });
                 }
 
                 // Elimina el usuario del contexto de la base de datos
@@ -169,11 +226,13 @@ namespace ApiPuntoVenta.Controllers
                 // Si todo va bien, devuelve una respuesta de éxito
                 return NoContent();
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // Si hay un error al eliminar el usuario, devuelve un error interno del servidor
-                // Aquí podrías registrar el error
-                return StatusCode(500, "Internal server error");
+                // Registra el error
+                _logger.LogError(ex, "An error occurred while deleting the user.");
+
+                // Devuelve un error interno del servidor sin detalles del error
+                return StatusCode(500, new { message = "Internal server error" });
             }
         }
 
